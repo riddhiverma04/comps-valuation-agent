@@ -1,22 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from typing import Optional
 
 class FinancialMetrics(BaseModel):
-    ticker: str = Field(description="Stock ticker symbol")
-    company_name: str = Field(default="Unknown")
-    fiscal_year: int = Field(default=2024)
-    
-    # Latest FY Metrics
-    revenue: float = Field(default=0.0)
-    operating_income: float = Field(default=0.0)
-    net_income: float = Field(default=0.0)
-    depreciation_amortization: float = Field(default=0.0)
-    cash_and_equivalents: float = Field(default=0.0)
-    total_debt: float = Field(default=0.0)
-    
-    # Multi-Year Historical Growth Context (in millions)
-    revenue_prior_year: float = Field(default=0.0, description="Revenue for FY-1")
-    revenue_two_years_ago: float = Field(default=0.0, description="Revenue for FY-2")
-    ltm_revenue: float = Field(default=0.0, description="Last Twelve Months Revenue")
+    revenue: Optional[float] = 0.0
+    operating_income: Optional[float] = 0.0
+    net_income: Optional[float] = 0.0
+    depreciation_amortization: Optional[float] = 0.0
+    cash_and_equivalents: Optional[float] = 0.0
+    total_debt: Optional[float] = 0.0
+    revenue_prior_year: Optional[float] = 0.0
+    revenue_two_years_ago: Optional[float] = 0.0
+    ltm_revenue: Optional[float] = 0.0
 
 class ValuationSummary(BaseModel):
     ticker: str
