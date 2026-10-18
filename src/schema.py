@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 class FinancialMetrics(BaseModel):
+    ticker: Optional[str] = None  # <-- Add this field
     revenue: Optional[float] = 0.0
     operating_income: Optional[float] = 0.0
     net_income: Optional[float] = 0.0
