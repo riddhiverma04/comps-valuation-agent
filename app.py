@@ -72,6 +72,7 @@ if run_button:
                     debt_to_ebitda=1.2
                 ))
             st.session_state['valuations'] = valuations
+            generate_comps_chart(valuations)  # Generates chart image in mock mode
             st.success("Mock valuation pipeline execution complete!")
     else:
         with st.spinner(f"Running live pipeline for target {target_ticker} and peer group..."):
@@ -107,7 +108,7 @@ if run_button:
 
             if valuations:
                 st.session_state['valuations'] = valuations
-                generate_comps_chart(valuations)
+                generate_comps_chart(valuations)  # Generates chart image in live mode
                 st.success("Live pipeline execution complete!")
             else:
                 st.warning("No valuations generated due to errors or rate limits.")
