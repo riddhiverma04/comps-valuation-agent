@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import pandas as pd
+import io
 import time
 from src.database import init_db, save_valuation_to_db
 from src.peer_discovery import discover_peers
@@ -31,18 +32,29 @@ class MockValuation:
         self.pe_ratio = pe_ratio
         self.debt_to_ebitda = debt_to_ebitda
 
-# Sidebar configuration
+# --- DYNAMIC SIDEBAR CONFIGURATION ---
 st.sidebar.header("Configuration")
 target_ticker = st.sidebar.text_input("Target Ticker", value="AAPL").upper()
+
+# Dynamic peer mapping based on target ticker
+PEER_MAP = {
+    "AAPL": ["MSFT", "NVDA", "AMZN", "GOOGL", "META"],
+    "MSFT": ["AAPL", "GOOGL", "AMZN", "ORCL", "IBM"],
+    "NVDA": ["AMD", "INTC", "TSM", "AVGO", "QCOM"],
+    "AMZN": ["WMT", "TGT", "EBAY", "BABA", "MSFT"],
+    "TSLA": ["RIVN", "LCID", "F", "GM", "NIO"]
+}
+
+# Auto-select relevant peers or fall back to standard tech peers
+suggested_peers = PEER_MAP.get(target_ticker, ["MSFT", "META", "NVDA", "AMZN"])
 
 # Offline Mock Mode Toggle (Defaults to True to bypass rate limits immediately)
 use_mock_data = st.sidebar.checkbox("🚀 Use Offline Mock Mode (Bypass Groq API)", value=True)
 
-available_peers = ["AAPL", "MSFT", "META", "NVDA", "AMZN", "TSLA"]
 selected_peers = st.sidebar.multiselect(
     "Peer Group Selection",
-    options=available_peers,
-    default=["MSFT", "META", "NVDA"]
+    options=list(set(suggested_peers + ["AAPL", "MSFT", "META", "NVDA", "AMZN", "TSLA", "GOOGL", "AMD"])),
+    default=suggested_peers[:3]  # Dynamically selects top 3 relevant peers
 )
 
 run_button = st.sidebar.button("Run Valuation Pipeline")
@@ -143,6 +155,19 @@ if 'valuations' in st.session_state:
     
     st.subheader("Peer Group Trading Comparables Table")
     st.dataframe(df, use_container_width=True)
+
+    # --- EXCEL DOWNLOAD FUNCTIONALITY ---
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Trading Comps')
+    buffer.seek(0)
+
+    st.download_button(
+        label="📥 Export Trading Comps to Excel",
+        data=buffer,
+        file_name=f"{target_ticker}_Trading_Comps.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     st.subheader("Valuation Multiples Chart (EV / EBITDA)")
     if os.path.exists("comps_chart.png"):
