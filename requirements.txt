@@ -3,6 +3,7 @@ matplotlib
 yfinance
 pandas
 groq
+openai
 sec-edgar-downloader
 pydantic
 python-dotenv
