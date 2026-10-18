@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import io
 import time
+import matplotlib.pyplot as plt
+import numpy as np
 from src.database import init_db, save_valuation_to_db
 from src.peer_discovery import discover_peers
 from src.sec_fetcher import fetch_latest_10k
@@ -32,11 +34,40 @@ class MockValuation:
         self.pe_ratio = pe_ratio
         self.debt_to_ebitda = debt_to_ebitda
 
+# --- FOOTBALL FIELD CHART GENERATOR ---
+def generate_football_field_chart(target_ticker, current_price, dcf_implied_val):
+    fig, ax = plt.subplots(figsize=(10, 4))
+    
+    methods = ["52-Week Range", "Trading Comps", "DCF Valuation"]
+    # Derive implied valuation ranges based on current price and DCF output
+    lows = [current_price * 0.75, current_price * 0.85, dcf_implied_val * 0.85]
+    highs = [current_price * 1.25, current_price * 1.35, dcf_implied_val * 1.15]
+    
+    y_pos = np.arange(len(methods))
+    
+    for i, (low, high) in enumerate(zip(lows, highs)):
+        ax.barh(y_pos[i], high - low, left=low, height=0.4, color='#1f77b4', alpha=0.8, edgecolor='black')
+        ax.text((low + high) / 2, y_pos[i], f"${low:.1f} - ${high:.1f}", ha='center', va='center', color='white', fontweight='bold', fontsize=9)
+        
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(methods, fontweight='bold')
+    ax.set_xlabel("Implied Share Price ($)")
+    ax.set_title(f"Valuation Summary ('Football Field') - {target_ticker}", fontsize=12, fontweight='bold')
+    
+    ax.axvline(x=current_price, color='red', linestyle='--', linewidth=1.5, label=f'Current Price (${current_price:.2f})')
+    ax.legend(loc='upper right')
+    
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    
+    plt.savefig("football_field_chart.png", dpi=300)
+    plt.close()
+
 # --- DYNAMIC SIDEBAR CONFIGURATION ---
 st.sidebar.header("Configuration")
 target_ticker = st.sidebar.text_input("Target Ticker", value="AAPL").upper()
 
-# Dynamic peer mapping based on target ticker
 PEER_MAP = {
     "AAPL": ["MSFT", "NVDA", "AMZN", "GOOGL", "META"],
     "MSFT": ["AAPL", "GOOGL", "AMZN", "ORCL", "IBM"],
@@ -45,17 +76,22 @@ PEER_MAP = {
     "TSLA": ["RIVN", "LCID", "F", "GM", "NIO"]
 }
 
-# Auto-select relevant peers or fall back to standard tech peers
 suggested_peers = PEER_MAP.get(target_ticker, ["MSFT", "META", "NVDA", "AMZN"])
 
-# Offline Mock Mode Toggle (Defaults to True to bypass rate limits immediately)
 use_mock_data = st.sidebar.checkbox("🚀 Use Offline Mock Mode (Bypass Groq API)", value=True)
 
 selected_peers = st.sidebar.multiselect(
     "Peer Group Selection",
     options=list(set(suggested_peers + ["AAPL", "MSFT", "META", "NVDA", "AMZN", "TSLA", "GOOGL", "AMD"])),
-    default=suggested_peers[:3]  # Dynamically selects top 3 relevant peers
+    default=suggested_peers[:3]
 )
+
+# --- DCF ASSUMPTIONS SIDEBAR ---
+st.sidebar.markdown("---")
+st.sidebar.header("DCF Valuation Assumptions")
+wacc = st.sidebar.slider("WACC (Discount Rate)", min_value=0.05, max_value=0.15, value=0.09, step=0.005)
+terminal_growth = st.sidebar.slider("Terminal Growth Rate", min_value=0.01, max_value=0.04, value=0.025, step=0.005)
+projection_years = st.sidebar.selectbox("Projection Period (Years)", options=[5, 10], index=0)
 
 run_button = st.sidebar.button("Run Valuation Pipeline")
 
@@ -66,7 +102,7 @@ if run_button:
     
     if use_mock_data:
         with st.spinner("⚡ Loading Offline Mock Data (API bypassed)..."):
-            time.sleep(1) # Simulated loading delay
+            time.sleep(1)
             valuations = []
             for i, t in enumerate(tickers):
                 valuations.append(MockValuation(
@@ -84,7 +120,7 @@ if run_button:
                     debt_to_ebitda=1.2
                 ))
             st.session_state['valuations'] = valuations
-            generate_comps_chart(valuations)  # Generates chart image in mock mode
+            generate_comps_chart(valuations)
             st.success("Mock valuation pipeline execution complete!")
     else:
         with st.spinner(f"Running live pipeline for target {target_ticker} and peer group..."):
@@ -95,8 +131,7 @@ if run_button:
             
             for i, ticker in enumerate(tickers):
                 try:
-                    time.sleep(2) # Respect Groq rate limits
-                    
+                    time.sleep(2)
                     filing_path = fetch_latest_10k(ticker)
                     if not filing_path or not os.path.exists(filing_path):
                         st.warning(f"Skipping {ticker}: 10-K filing path not found.")
@@ -120,7 +155,7 @@ if run_button:
 
             if valuations:
                 st.session_state['valuations'] = valuations
-                generate_comps_chart(valuations)  # Generates chart image in live mode
+                generate_comps_chart(valuations)
                 st.success("Live pipeline execution complete!")
             else:
                 st.warning("No valuations generated due to errors or rate limits.")
@@ -172,5 +207,51 @@ if 'valuations' in st.session_state:
     st.subheader("Valuation Multiples Chart (EV / EBITDA)")
     if os.path.exists("comps_chart.png"):
         st.image("comps_chart.png", width="stretch")
+
+    # --- INTRINSIC DCF VALUATION MODEL ---
+    st.markdown("---")
+    st.subheader(f"Intrinsic DCF Valuation Model ({target_ticker})")
+    
+    target_data = next((v for v in vals if getattr(v, 'ticker', '') == target_ticker), None)
+    
+    if target_data:
+        base_ebitda = getattr(target_data, 'ebitda', 115000.0)
+        base_fcf = base_ebitda * 0.60
+        fcf_growth_rate = 0.08
+        
+        projected_fcfs = []
+        current_fcf = base_fcf
+        for year in range(1, projection_years + 1):
+            current_fcf *= (1 + fcf_growth_rate)
+            discounted_fcf = current_fcf / ((1 + wacc) ** year)
+            projected_fcfs.append(discounted_fcf)
+            
+        sum_pv_fcf = sum(projected_fcfs)
+        
+        final_year_fcf = projected_fcfs[-1]
+        terminal_value = (final_year_fcf * (1 + terminal_growth)) / (wacc - terminal_growth)
+        pv_terminal_value = terminal_value / ((1 + wacc) ** projection_years)
+        
+        implied_ev = sum_pv_fcf + pv_terminal_value
+        current_share_price = getattr(target_data, 'share_price', 150.0)
+        
+        # Approximate implied share price from DCF Enterprise Value
+        dcf_implied_share_price = current_share_price * (implied_ev / 2600000.0) if implied_ev > 0 else current_share_price
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Cumulative PV of FCF ($M)", f"${sum_pv_fcf:,.1f}")
+        col2.metric("PV of Terminal Value ($M)", f"${pv_terminal_value:,.1f}")
+        col3.metric("Implied Enterprise Value ($M)", f"${implied_ev:,.1f}")
+        col4.metric("Current Share Price ($)", f"${current_share_price:.2f}")
+
+        # --- GENERATE & RENDER FOOTBALL FIELD CHART ---
+        generate_football_field_chart(target_ticker, current_share_price, dcf_implied_share_price)
+        
+        st.markdown("---")
+        st.subheader("Valuation Summary ('Football Field' Chart)")
+        if os.path.exists("football_field_chart.png"):
+            st.image("football_field_chart.png", width="stretch")
+    else:
+        st.info("Select a valid target ticker in the sidebar to run the DCF model.")
 else:
     st.info("Configure your target ticker and peer group in the sidebar, then click **Run Valuation Pipeline** to get started.")
