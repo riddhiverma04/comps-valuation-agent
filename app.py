@@ -44,7 +44,7 @@ def select_valuation_model_background(ticker_symbol: str) -> dict:
         "selected_model": model_type
     }
 
-# --- HISTORICAL DATA LOADER WITH MULTI-SECTOR SUPPORT ---
+# --- HISTORICAL DATA LOADER WITH SECTOR-SPECIFIC CLEANING ---
 @st.cache_data(ttl=3600)
 def load_historical_data(sym: str) -> pd.DataFrame:
     t = yf.Ticker(sym)
@@ -82,7 +82,8 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
     merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
     
-    return merged.dropna(subset=['P_E', 'EV_EBITDA', 'P_B', 'P_FFO'])
+    # Return dataframe validated on close price rather than restrictive global dropping across all metrics
+    return merged.dropna(subset=['Close'])
 
 # --- USER CONTROLS WITH QUICK-TEST SECTOR PRESETS ---
 st.markdown("### 🔍 Quick-Test Sector Router Presets")
