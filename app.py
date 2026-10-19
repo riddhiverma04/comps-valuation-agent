@@ -64,7 +64,10 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     df_f['LTM_EBITDA'] = fin.get(ebitda_col, pd.Series(dtype=float)).rolling(4).sum()
     df_f['Total_Debt'] = bs.get('Total Debt', 0)
     df_f['Cash'] = bs.get('Cash And Cash Equivalents', 0)
-    df_f.index = pd.to_datetime(df_f.index)
+    
+    # --- TIMEZONE FIX FOR MERGE_ASOF ---
+    hist.index = pd.to_datetime(hist.index).tz_localize(None)
+    df_f.index = pd.to_datetime(df_f.index).tz_localize(None)
     
     merged = pd.merge_asof(hist.sort_index(), df_f.sort_index(), left_index=True, right_index=True, direction='backward')
     shares = t.info.get('sharesOutstanding', 1)
