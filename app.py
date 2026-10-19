@@ -82,29 +82,27 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
     merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
     
-    # Return dataframe validated on close price rather than restrictive global dropping across all metrics
     return merged.dropna(subset=['Close'])
 
 # --- USER CONTROLS WITH QUICK-TEST SECTOR PRESETS ---
 st.markdown("### 🔍 Quick-Test Sector Router Presets")
 cols = st.columns(4)
 
-# Session state initialization for preset buttons
-if 'ticker_val' not in st.session_state:
-    st.session_state.ticker_val = "MSFT"
+# Callbacks to update session state cleanly when buttons are clicked
+def set_msft(): st.session_state.my_ticker = "MSFT"
+def set_cat(): st.session_state.my_ticker = "CAT"
+def set_o(): st.session_state.my_ticker = "O"
+def set_jpm(): st.session_state.my_ticker = "JPM"
 
-if cols[0].button("💻 Tech (MSFT)"):
-    st.session_state.ticker_val = "MSFT"
-elif cols[1].button("🏭 Industrial (CAT)"):
-    st.session_state.ticker_val = "CAT"
-elif cols[2].button("🏢 REIT (O)"):
-    st.session_state.ticker_val = "O"
-elif cols[3].button("🏦 Financial (JPM)"):
-    st.session_state.ticker_val = "JPM"
+cols[0].button("💻 Tech (MSFT)", on_click=set_msft)
+cols[1].button("🏭 Industrial (CAT)", on_click=set_cat)
+cols[2].button("🏢 REIT (O)", on_click=set_o)
+cols[3].button("🏦 Financial (JPM)", on_click=set_jpm)
 
 col_input1, col_input2 = st.columns(2)
 with col_input1:
-    ticker = st.text_input("Enter Equity Ticker Symbol", value=st.session_state.ticker_val).upper()
+    # key="my_ticker" ensures text input updates dynamically when preset buttons are clicked
+    ticker = st.text_input("Enter Equity Ticker Symbol", value="MSFT", key="my_ticker").upper()
 with col_input2:
     custom_model_value = st.number_input("Your Model Implied Fair Value ($)", value=420.00)
 
@@ -157,6 +155,16 @@ if ticker:
                     height=450
                 )
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # --- EXCEL / CSV EXPORT MODULE ---
+                st.markdown("---")
+                csv_data = hist_df.to_csv().encode('utf-8')
+                st.download_button(
+                    label="📥 Download Valuation Model & Historical Multiples (CSV/Excel)",
+                    data=csv_data,
+                    file_name=f"{ticker}_valuation_model_output.csv",
+                    mime="text/csv",
+                )
             else:
                 st.warning("Could not construct historical series due to restricted fundamental reporting frequency or missing financial data for this symbol.")
 
@@ -181,6 +189,17 @@ if ticker:
             c2.metric("Your Model Value", f"${custom_model_value:.2f}", f"{model_vs_market:+.1f}%")
             c3.metric("Street Mean Target", f"${mean_target:.2f}", f"{street_vs_market:+.1f}%")
             c4.metric("Model vs. Street Spread", f"{model_vs_street:+.1f}%", help="Positive = Model is more bullish than major brokerages")
+            
+            st.markdown("---")
+            
+            # --- DYNAMIC INVESTMENT RECOMMENDATION BADGE ---
+            upside_potential = ((custom_model_value - curr_price) / curr_price) * 100
+            if upside_potential > 15:
+                st.success(f"💡 **Institutional Verdict:** STRONG BUY ({upside_potential:+.1f}% implied upside relative to your model value).")
+            elif upside_potential < -15:
+                st.error(f"⚠️ **Institutional Verdict:** OVERVALUED / SELL ({upside_potential:+.1f}% downside relative to your model value).")
+            else:
+                st.warning(f"⚖️ **Institutional Verdict:** HOLD / FAIRLY VALUED ({upside_potential:+.1f}% spread).")
             
             st.markdown("---")
             
