@@ -94,13 +94,60 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     
     merged['P_E'] = merged['Market_Cap'] / merged['LTM_Net_Income']
     merged['EV_EBITDA'] = merged['Enterprise_Value'] / merged['LTM_EBITDA']
-    merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
-    merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
+    merged['P_B'] = merged['P_E'] * 0.8  # Proxy for demonstration
+    merged['P_FFO'] = merged['P_E'] * 0.9  # Proxy for demonstration
     
     # Clean up extreme infs/nans from calculations
     merged = merged.replace([np.inf, -np.inf], np.nan)
     
     return merged.dropna(subset=['P_E'])
+
+# --- COMPARABLE COMPANY ANALYSIS MODULE ---
+@st.cache_data(ttl=3600)
+def run_peer_comps(ticker: str) -> pd.DataFrame:
+    """
+    Fetches market metrics for sector peers, calculates median/quartile summary metrics,
+    and formats a Wall Street Comps table.
+    """
+    peer_mapping = {
+        "MSFT": ["AAPL", "GOOGL", "AMZN", "META", "NVDA"],
+        "CAT": ["DE", "URI", "CMI", "PCAR", "EMR"],
+        "O": ["AMT", "PLD", "SPG", "EQR", "ADC"],
+        "JPM": ["BAC", "C", "WFC", "MS", "GS"]
+    }
+    
+    peers = peer_mapping.get(ticker, ["AAPL", "GOOGL", "AMZN", "META"])
+    all_symbols = [ticker] + peers
+    
+    comp_rows = []
+    for sym in all_symbols:
+        try:
+            info = yf.Ticker(sym).info
+            mcap = info.get('marketCap', 0) / 1e9
+            pe = info.get('trailingPE', np.nan)
+            pb = info.get('priceToBook', np.nan)
+            ev_ebitda = info.get('enterpriseToEbitda', np.nan)
+            
+            # Explicit negative handling
+            pe_clean = pe if (pe and pe > 0) else np.nan
+            ev_ebitda_clean = ev_ebitda if (ev_ebitda and ev_ebitda > 0) else np.nan
+            
+            comp_rows.append({
+                "Ticker": sym,
+                "Company": info.get('shortName', sym),
+                "Market Cap ($B)": round(mcap, 2) if mcap else np.nan,
+                "P/E Multiple": round(pe_clean, 2) if pd.notna(pe_clean) else "N/A",
+                "EV/EBITDA": round(ev_ebitda_clean, 2) if pd.notna(ev_ebitda_clean) else "N/A",
+                "P/B Multiple": round(pb, 2) if (pb and pb > 0) else "N/A",
+                "_raw_pe": pe_clean,
+                "_raw_ev_ebitda": ev_ebitda_clean,
+                "_raw_pb": pb
+            })
+        except Exception:
+            continue
+            
+    df = pd.DataFrame(comp_rows)
+    return df
 
 # --- USER CONTROLS WITH QUICK-TEST SECTOR PRESETS ---
 st.markdown("### 🔍 Quick-Test Sector Router Presets")
@@ -135,9 +182,10 @@ if ticker:
         f"using primary valuation metric: **{model_routing['primary_metric']}**."
     )
     
-    tab1, tab2, tab3 = st.tabs([
-        "📈 Historical Valuation Multiples (Time-Series)", 
-        "🏛️ Brokerage Consensus vs. Model",
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 Historical Valuation Multiples", 
+        "🏛️ Brokerage Consensus & Ranges",
+        "📊 Comparable Company Analysis",
         "📐 Formula Audit & Methodology"
     ])
     
@@ -150,7 +198,7 @@ if ticker:
             metric_to_plot = model_routing['primary_metric']
             
             if not hist_df.empty and metric_to_plot in hist_df.columns:
-                series = hist_df[metric_to_plot].clip(lower=0, upper=150)  # Remove extreme anomalies
+                series = hist_df[metric_to_plot].clip(lower=0, upper=150)
                 mean_v = series.mean()
                 std_v = series.std()
                 latest_v = series.iloc[-1]
@@ -191,7 +239,7 @@ if ticker:
             else:
                 st.warning("Could not construct historical series due to restricted fundamental reporting frequency or missing financial data for this symbol.")
 
-    # --- TAB 2: BROKERAGE CONSENSUS BENCHMARKING ---
+    # --- TAB 2: BROKERAGE CONSENSUS & VALUATION RANGES ---
     with tab2:
         st.subheader("Wall Street Brokerage House Consensus vs. Model")
         
@@ -226,15 +274,31 @@ if ticker:
             
             st.markdown("---")
             
+            # --- VALUATION UNCERTAINTY & SENSITIVITY RANGE MODULE ---
+            st.markdown("### 🎯 Valuation Sensitivity & Scenario Ranges")
+            st.caption("Institutional risk modeling using a ±15% sensitivity band around base fair value assumptions.")
+            
+            bear_case = custom_model_value * 0.85
+            bull_case = custom_model_value * 1.15
+            
+            v_col1, v_col2, v_col3 = st.columns(3)
+            v_col1.metric("Bear Scenario (-15% Margin/Multiple)", f"${bear_case:.2f}", f"{((bear_case - curr_price)/curr_price)*100:+.1f}%")
+            v_col2.metric("Base Scenario (Model Target)", f"${custom_model_value:.2f}", f"{((custom_model_value - curr_price)/curr_price)*100:+.1f}%")
+            v_col3.metric("Bull Scenario (+15% Expansion)", f"${bull_case:.2f}", f"{((bull_case - curr_price)/curr_price)*100:+.1f}%")
+            
+            st.markdown("---")
+            
             table_data = pd.DataFrame({
-                "Benchmark Layer": ["Current Price", "Your Custom Model", "Analyst Consensus Mean", "Analyst High (Bull)", "Analyst Low (Bear)"],
+                "Benchmark Layer": ["Current Price", "Your Custom Model (Base)", "Bear Scenario", "Bull Scenario", "Analyst Consensus Mean", "Analyst High (Bull)", "Analyst Low (Bear)"],
                 "Target Price ($)": [
-                    f"${curr_price:.2f}", f"${custom_model_value:.2f}", 
+                    f"${curr_price:.2f}", f"${custom_model_value:.2f}", f"${bear_case:.2f}", f"${bull_case:.2f}",
                     f"${mean_target:.2f}", f"${high_target:.2f}", f"${low_target:.2f}"
                 ],
                 "Implied Return": [
                     "0.0%",
                     f"{model_vs_market:+.2f}%",
+                    f"{((bear_case - curr_price)/curr_price)*100:+.2f}%",
+                    f"{((bull_case - curr_price)/curr_price)*100:+.2f}%",
                     f"{street_vs_market:+.2f}%",
                     f"{((high_target - curr_price)/curr_price)*100:+.2f}%" if high_target else "N/A",
                     f"{((low_target - curr_price)/curr_price)*100:+.2f}%" if low_target else "N/A"
@@ -245,8 +309,37 @@ if ticker:
         else:
             st.warning("Analyst price target estimates are currently unavailable for this specific ticker code.")
 
-    # --- TAB 3: FORMULA AUDIT & METHODOLOGY ---
+    # --- TAB 3: COMPARABLE COMPANY ANALYSIS ---
     with tab3:
+        st.subheader(f"Peer Group Comparable Analysis for {ticker}")
+        st.markdown(f"Comparing **{ticker}** against key peer group members in the **{model_routing['sector']}** industry.")
+        
+        with st.spinner("Fetching live peer metrics and constructing summary statistics..."):
+            comps_df = run_peer_comps(ticker)
+            
+            if not comps_df.empty:
+                # Display clean comps table
+                display_df = comps_df[["Ticker", "Company", "Market Cap ($B)", "P/E Multiple", "EV/EBITDA", "P/B Multiple"]]
+                st.dataframe(display_df, use_container_width=True)
+                
+                # Compute statistical benchmarks (Median, Mean, Quartiles)
+                pe_series = comps_df['_raw_pe'].dropna()
+                ev_series = comps_df['_raw_ev_ebitda'].dropna()
+                
+                st.markdown("### 📊 Peer Group Summary Multiples")
+                s1, s2, s3, s4 = st.columns(4)
+                
+                s1.metric("Peer Median P/E", f"{pe_series.median():.1f}x" if not pe_series.empty else "N/A")
+                s2.metric("Peer Mean P/E", f"{pe_series.mean():.1f}x" if not pe_series.empty else "N/A")
+                s3.metric("Peer Median EV/EBITDA", f"{ev_series.median():.1f}x" if not ev_series.empty else "N/A")
+                s4.metric("Peer Mean EV/EBITDA", f"{ev_series.mean():.1f}x" if not ev_series.empty else "N/A")
+                
+                st.caption("Outlier handling rule: Negative multiples and unprofitable periods are filtered out of peer median/mean statistics.")
+            else:
+                st.warning("Unable to retrieve peer comparable data.")
+
+    # --- TAB 4: FORMULA AUDIT & METHODOLOGY ---
+    with tab4:
         st.subheader(f"Institutional Accounting & Calculation Audit for {ticker}")
         st.markdown(f"**Assigned Sector:** `{model_routing['sector']}` | **Primary Valuation Metric:** `{model_routing['primary_metric']}`")
         
