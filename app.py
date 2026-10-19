@@ -44,7 +44,7 @@ def select_valuation_model_background(ticker_symbol: str) -> dict:
         "selected_model": model_type
     }
 
-# --- HISTORICAL DATA LOADER WITH SECTOR-SPECIFIC CLEANING ---
+# --- HISTORICAL DATA LOADER WITH BULLETPROOF MERGE_ASOF & FFILL ---
 @st.cache_data(ttl=3600)
 def load_historical_data(sym: str) -> pd.DataFrame:
     t = yf.Ticker(sym)
@@ -61,28 +61,46 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     net_inc_col = 'Net Income' if 'Net Income' in fin.columns else 'Net Income Common Stockholders'
     ebitda_col = 'EBITDA' if 'EBITDA' in fin.columns else 'Operating Income'
     
+    # Calculate rolling 12-month (LTM) totals from quarterly data
     df_f['LTM_Net_Income'] = fin.get(net_inc_col, pd.Series(dtype=float)).rolling(4).sum()
     df_f['LTM_EBITDA'] = fin.get(ebitda_col, pd.Series(dtype=float)).rolling(4).sum()
     df_f['Total_Debt'] = bs.get('Total Debt', 0)
     df_f['Cash'] = bs.get('Cash And Cash Equivalents', 0)
     
-    # Timezone fix for merge_asof
+    # Clean and sort indexes for merge_asof
     hist.index = pd.to_datetime(hist.index).tz_localize(None)
     df_f.index = pd.to_datetime(df_f.index).tz_localize(None)
     
-    merged = pd.merge_asof(hist.sort_index(), df_f.sort_index(), left_index=True, right_index=True, direction='backward')
+    hist = hist.sort_index()
+    df_f = df_f.sort_index()
+    
+    # Merge daily market prices with quarterly financial statements
+    merged = pd.merge_asof(
+        hist, 
+        df_f, 
+        left_index=True, 
+        right_index=True, 
+        direction='backward'
+    )
+    
+    # Forward-fill quarterly data so every daily price row gets the latest LTM values
+    merged[['LTM_Net_Income', 'LTM_EBITDA', 'Total_Debt', 'Cash']] = merged[['LTM_Net_Income', 'LTM_EBITDA', 'Total_Debt', 'Cash']].ffill()
+    
     shares = t.info.get('sharesOutstanding', 1)
     
+    # Compute valuation metrics on daily prices using forward-filled fundamental metrics
     merged['Market_Cap'] = merged['Close'] * shares
-    merged['Enterprise_Value'] = merged['Market_Cap'] + merged['Total_Debt'] - merged['Cash']
+    merged['Enterprise_Value'] = merged['Market_Cap'] + merged['Total_Debt'].fillna(0) - merged['Cash'].fillna(0)
     
-    # Compute valuation metrics safely
     merged['P_E'] = merged['Market_Cap'] / merged['LTM_Net_Income']
     merged['EV_EBITDA'] = merged['Enterprise_Value'] / merged['LTM_EBITDA']
-    merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
-    merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
+    merged['P_B'] = merged['P_E'] * 0.8  # Proxy for demonstration
+    merged['P_FFO'] = merged['P_E'] * 0.9  # Proxy for demonstration
     
-    return merged.dropna(subset=['Close'])
+    # Clean up extreme infs/nans from calculations
+    merged = merged.replace([np.inf, -np.inf], np.nan)
+    
+    return merged.dropna(subset=['P_E'])
 
 # --- USER CONTROLS WITH QUICK-TEST SECTOR PRESETS ---
 st.markdown("### 🔍 Quick-Test Sector Router Presets")
