@@ -84,10 +84,26 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     
     return merged.dropna(subset=['P_E', 'EV_EBITDA', 'P_B', 'P_FFO'])
 
-# --- USER CONTROLS ---
+# --- USER CONTROLS WITH QUICK-TEST SECTOR PRESETS ---
+st.markdown("### 🔍 Quick-Test Sector Router Presets")
+cols = st.columns(4)
+
+# Session state initialization for preset buttons
+if 'ticker_val' not in st.session_state:
+    st.session_state.ticker_val = "MSFT"
+
+if cols[0].button("💻 Tech (MSFT)"):
+    st.session_state.ticker_val = "MSFT"
+elif cols[1].button("🏭 Industrial (CAT)"):
+    st.session_state.ticker_val = "CAT"
+elif cols[2].button("🏢 REIT (O)"):
+    st.session_state.ticker_val = "O"
+elif cols[3].button("🏦 Financial (JPM)"):
+    st.session_state.ticker_val = "JPM"
+
 col_input1, col_input2 = st.columns(2)
 with col_input1:
-    ticker = st.text_input("Enter Equity Ticker Symbol", value="MSFT").upper()
+    ticker = st.text_input("Enter Equity Ticker Symbol", value=st.session_state.ticker_val).upper()
 with col_input2:
     custom_model_value = st.number_input("Your Model Implied Fair Value ($)", value=420.00)
 
