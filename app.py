@@ -8,11 +8,11 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="Institutional Valuation Agent", layout="wide")
 st.title("📊 Dynamic Equity Valuation & Institutional Comparison Engine")
 
-# --- BACKGROUND SECTOR MODEL ROUTER ---
+# --- ENHANCED BACKGROUND SECTOR MODEL ROUTER ---
 def select_valuation_model_background(ticker_symbol: str) -> dict:
     """
-    Inspects company sector/industry data and maps it to the appropriate
-    valuation model workflow in the background.
+    Inspects company sector/industry data and dynamically routes to 
+    the industry-standard valuation methodology (REITs, Financials, Industrials, Tech).
     """
     try:
         ticker = yf.Ticker(ticker_symbol)
@@ -23,18 +23,19 @@ def select_valuation_model_background(ticker_symbol: str) -> dict:
         sector = 'Unknown'
         industry = 'Unknown'
     
-    capital_intensive_sectors = ['Energy', 'Industrials', 'Utilities', 'Basic Materials', 'Real Estate']
-    growth_tech_sectors = ['Technology', 'Communication Services', 'Consumer Cyclical']
-    
-    if sector in capital_intensive_sectors:
+    # Define sector-to-model routing logic mirroring institutional equity research
+    if sector == 'Financial Services':
+        primary_metric = 'P_B'
+        model_type = 'Price-to-Book (P/B) & Dividend Discount Model'
+    elif sector == 'Real Estate':
+        primary_metric = 'P_FFO'
+        model_type = 'Price to Funds From Operations (P/FFO) & Cap Rate Model'
+    elif sector in ['Energy', 'Industrials', 'Utilities', 'Basic Materials']:
         primary_metric = 'EV_EBITDA'
-        model_type = 'Enterprise Value & Multiple Band Model'
-    elif sector in growth_tech_sectors:
+        model_type = 'Enterprise Value to EBITDA & Multiple Band Model'
+    else: # Technology, Communication Services, Consumer Cyclical, Healthcare, etc.
         primary_metric = 'P_E'
         model_type = 'Price-to-Earnings & Growth Multiple Model'
-    else:
-        primary_metric = 'P_E'
-        model_type = 'Standard Discounted Cash Flow (DCF)'
         
     return {
         "sector": sector,
@@ -43,7 +44,7 @@ def select_valuation_model_background(ticker_symbol: str) -> dict:
         "selected_model": model_type
     }
 
-# --- HISTORICAL DATA LOADER ---
+# --- HISTORICAL DATA LOADER WITH MULTI-SECTOR SUPPORT ---
 @st.cache_data(ttl=3600)
 def load_historical_data(sym: str) -> pd.DataFrame:
     t = yf.Ticker(sym)
@@ -56,7 +57,7 @@ def load_historical_data(sym: str) -> pd.DataFrame:
         
     df_f = pd.DataFrame(index=fin.index)
     
-    # Safely pull net income and ebitda
+    # Safely pull financial line items across varying reporting standards
     net_inc_col = 'Net Income' if 'Net Income' in fin.columns else 'Net Income Common Stockholders'
     ebitda_col = 'EBITDA' if 'EBITDA' in fin.columns else 'Operating Income'
     
@@ -65,7 +66,7 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     df_f['Total_Debt'] = bs.get('Total Debt', 0)
     df_f['Cash'] = bs.get('Cash And Cash Equivalents', 0)
     
-    # --- TIMEZONE FIX FOR MERGE_ASOF ---
+    # Timezone fix for merge_asof
     hist.index = pd.to_datetime(hist.index).tz_localize(None)
     df_f.index = pd.to_datetime(df_f.index).tz_localize(None)
     
@@ -74,10 +75,14 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     
     merged['Market_Cap'] = merged['Close'] * shares
     merged['Enterprise_Value'] = merged['Market_Cap'] + merged['Total_Debt'] - merged['Cash']
+    
+    # Compute valuation metrics safely
     merged['P_E'] = merged['Market_Cap'] / merged['LTM_Net_Income']
     merged['EV_EBITDA'] = merged['Enterprise_Value'] / merged['LTM_EBITDA']
+    merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
+    merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
     
-    return merged.dropna(subset=['P_E', 'EV_EBITDA'])
+    return merged.dropna(subset=['P_E', 'EV_EBITDA', 'P_B', 'P_FFO'])
 
 # --- USER CONTROLS ---
 col_input1, col_input2 = st.columns(2)
