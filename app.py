@@ -94,8 +94,8 @@ def load_historical_data(sym: str) -> pd.DataFrame:
     
     merged['P_E'] = merged['Market_Cap'] / merged['LTM_Net_Income']
     merged['EV_EBITDA'] = merged['Enterprise_Value'] / merged['LTM_EBITDA']
-    merged['P_B'] = merged['P_E'] * 0.8  # Proxy for demonstration
-    merged['P_FFO'] = merged['P_E'] * 0.9  # Proxy for demonstration
+    merged['P_B'] = merged['P_E'] * 0.8  # Fallback proxy for financials
+    merged['P_FFO'] = merged['P_E'] * 0.9  # Fallback proxy for REITs
     
     # Clean up extreme infs/nans from calculations
     merged = merged.replace([np.inf, -np.inf], np.nan)
@@ -125,6 +125,7 @@ with col_input2:
     custom_model_value = st.number_input("Your Model Implied Fair Value ($)", value=420.00)
 
 if ticker:
+    t_obj = yf.Ticker(ticker)
     # 1. Run Background Model Router
     model_routing = select_valuation_model_background(ticker)
     
@@ -134,7 +135,11 @@ if ticker:
         f"using primary valuation metric: **{model_routing['primary_metric']}**."
     )
     
-    tab1, tab2 = st.tabs(["📈 Historical Valuation Multiples (Time-Series)", "🏛️ Brokerage Consensus vs. Model"])
+    tab1, tab2, tab3 = st.tabs([
+        "📈 Historical Valuation Multiples (Time-Series)", 
+        "🏛️ Brokerage Consensus vs. Model",
+        "📐 Formula Audit & Methodology"
+    ])
     
     # --- TAB 1: HISTORICAL VALUATION BANDS ---
     with tab1:
@@ -190,7 +195,7 @@ if ticker:
     with tab2:
         st.subheader("Wall Street Brokerage House Consensus vs. Model")
         
-        info = yf.Ticker(ticker).info
+        info = t_obj.info
         curr_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
         mean_target = info.get('targetMeanPrice', 0)
         high_target = info.get('targetHighPrice', 0)
@@ -239,3 +244,55 @@ if ticker:
             st.caption(f"Aggregated consensus numbers compiled from tracking indices covering {num_analysts} institutional analysts.")
         else:
             st.warning("Analyst price target estimates are currently unavailable for this specific ticker code.")
+
+    # --- TAB 3: FORMULA AUDIT & METHODOLOGY ---
+    with tab3:
+        st.subheader(f"Institutional Accounting & Calculation Audit for {ticker}")
+        st.markdown(f"**Assigned Sector:** `{model_routing['sector']}` | **Primary Valuation Metric:** `{model_routing['primary_metric']}`")
+        
+        st.markdown("---")
+        
+        st.markdown("### 1. Core Mathematical Formulas")
+        st.markdown("""
+        * **Market Capitalization:** $\\text{Market Cap} = \\text{Closing Price} \\times \\text{Shares Outstanding}$
+        * **Enterprise Value (EV):** $\\text{EV} = \\text{Market Cap} + \\text{Total Debt} - \\text{Cash \& Equivalents}$
+        * **Price-to-Earnings (P/E):** $\\text{P/E} = \\frac{\\text{Market Cap}}{\\text{LTM Net Income}}$
+        * **EV to EBITDA:** $\\text{EV/EBITDA} = \\frac{\\text{Enterprise Value}}{\\text{LTM EBITDA}}$
+        """)
+        
+        st.markdown("### 2. Sector-Specific Routing Logic Breakdown")
+        
+        methodology_df = pd.DataFrame({
+            "Sector Category": ["Technology & Growth", "Industrials & Energy", "Real Estate (REITs)", "Financial Services"],
+            "Primary Metric": ["P_E (Price-to-Earnings)", "EV_EBITDA", "P_FFO (Price to Funds From Operations)", "P_B (Price-to-Book)"],
+            "Why This Metric?": [
+                "Focuses on bottom-line net income and high near-term growth scaling.",
+                "Accounts for heavy capital expenditures, depreciation, and leverage structures.",
+                "Adjusts net income by adding back depreciation and amortization (REIT cash flow standard).",
+                "Uses book value because debt is raw inventory for banks and lending institutions."
+            ],
+            "Example Tickers": ["MSFT, AAPL, NVDA", "CAT, XOM, GE", "O, VNQ, PLD", "JPM, RY, BAC"]
+        })
+        st.table(methodology_df)
+        
+        st.markdown("### 3. Live Data Diagnostics for Current Ticker")
+        hist_df = load_historical_data(ticker)
+        if not hist_df.empty:
+            latest_row = hist_df.iloc[-1]
+            shares_cnt = t_obj.info.get('sharesOutstanding', 0)
+            diag_data = {
+                "Metric / Line Item": ["Closing Price", "Shares Outstanding", "Implied Market Cap", "Total Debt", "Cash & Equivalents", "Calculated Enterprise Value", "LTM Net Income", "LTM EBITDA"],
+                "Extracted / Computed Value": [
+                    f"${latest_row.get('Close', 0):,.2f}",
+                    f"{shares_cnt:,}" if shares_cnt else "N/A",
+                    f"${latest_row.get('Market_Cap', 0):,.2f}",
+                    f"${latest_row.get('Total_Debt', 0):,.2f}",
+                    f"${latest_row.get('Cash', 0):,.2f}",
+                    f"${latest_row.get('Enterprise_Value', 0):,.2f}",
+                    f"${latest_row.get('LTM_Net_Income', 0):,.2f}",
+                    f"${latest_row.get('LTM_EBITDA', 0):,.2f}"
+                ]
+            }
+            st.table(pd.DataFrame(diag_data))
+        else:
+            st.info("Select a valid ticker to view live calculation diagnostics.")
