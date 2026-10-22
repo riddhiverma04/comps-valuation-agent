@@ -47,7 +47,7 @@ def select_valuation_model_background(ticker_symbol: str) -> dict:
   }
 
 
-# --- HISTORICAL DATA LOADER WITH TIMEZONE-SAFE MERGE_ASOF ---
+# --- HISTORICAL DATA LOADER WITH BULLETPROOF DATETIME STANDARDIZATION ---
 @st.cache_data(ttl=3600)
 def load_historical_data(sym: str) -> pd.DataFrame:
   t = yf.Ticker(sym)
@@ -95,14 +95,22 @@ def load_historical_data(sym: str) -> pd.DataFrame:
       "Cash And Cash Equivalents", pd.Series(0, index=combined.index)
   )
 
-  # Convert both merge keys to datetime types
+  # --- BULLETPROOF DATETIME CONVERSION & DTYPE MATCHING ---
   hist["Date"] = pd.to_datetime(hist["Date"], errors="coerce")
-  if hist["Date"].dt.tz is not None:
-    hist["Date"] = hist["Date"].dt.tz_convert(None)
+  try:
+    hist["Date"] = hist["Date"].dt.tz_localize(None)
+  except Exception:
+    pass
 
   financials["Date"] = pd.to_datetime(financials["Date"], errors="coerce")
-  if financials["Date"].dt.tz is not None:
-    financials["Date"] = financials["Date"].dt.tz_convert(None)
+  try:
+    financials["Date"] = financials["Date"].dt.tz_localize(None)
+  except Exception:
+    pass
+
+  # Force exact matching datetime64[ns] dtypes
+  hist["Date"] = hist["Date"].astype("datetime64[ns]")
+  financials["Date"] = financials["Date"].astype("datetime64[ns]")
 
   # Remove rows with invalid dates
   hist = hist.dropna(subset=["Date"])
@@ -119,6 +127,7 @@ def load_historical_data(sym: str) -> pd.DataFrame:
       on="Date",
       direction="backward",
   )
+  # --------------------------------------------------------
 
   # Forward-fill quarterly data so every daily price row gets the latest LTM values
   merged[["LTM_Net_Income", "LTM_EBITDA", "Total_Debt", "Cash"]] = merged[
